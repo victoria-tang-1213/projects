@@ -1,0 +1,561 @@
+---
+title: "project_Dallas police data"
+output:
+  html_document: default
+  pdf_document: default
+date: "2023-04-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Police brutality, according to Amnesty International, means human rights violations by police [1]. The following behaviours are considered human rights violations, such as racial abuse, beating and unlawful killing. In the United States, the use of lethal force and racial abuse by police are condemned over the years. Mapping Police Violence indicates that in 2016, 1,070 persons were killed by the US police and compared with White people, Black people have 2.9 times higher probability to be killed [18]. On the other hand, the National Institute of Justice claimed that under self-defence or in defence of any other individual or group’s cases, the police use of force is requisite [19]. In this report, the 2016 police department record by Dallas Police was examined. The aim is to find out the factors that cause crime occurrences and if police brutality and racial discrimination were present during law enforcement.
+
+```{r, message=FALSE, warning=FALSE}
+# Load in the libraries
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(corrplot)
+library(rcompanion)
+library(rgdal)
+library(Rcpp)
+library(sf)
+library(ggmap)
+library(leaflet)
+library(scales)
+library(gridExtra)
+library(ggthemes)
+library(xts)
+library(reshape2)
+library(tidyquant)
+library(plotly)
+library(ggbeeswarm)
+library(mltools)
+library(data.table)
+library(grid)
+library(vcd)
+```
+
+```{r}
+# Read in the csv
+dallas_crime <- read.csv('37-00049_UOF-P_2016_prepped.csv')
+```
+
+# Data Cleaning and Data Exploration
+
+Data cleaning, including examining and removing missing values, transforming the data into a usable format, and sub-setting the data frame, was performed before the data exploration process. The data frame consists of 48 attributes and 2383 observations. The first row was then deleted because it duplicates the column names.
+```{r}
+# View the first 6 rows
+head(dallas_crime)
+```
+
+```{r message=FALSE, echo = TRUE, results = "hide"}
+# Drop the first row
+dallas_crime <- dallas_crime[-1,]
+head(dallas_crime)
+```
+Each column of the data frame was then reviewed. Regarding the information contained and its suitability, they were concatenated, removed, and transformed into a more appropriate format. Missing values in incident time and location were removed for further analysis.
+
+```{r}
+# Group incident date and time into one column
+dallas_crime <- transform(dallas_crime, INCIDENT_DATETIME=paste(INCIDENT_DATE, INCIDENT_TIME, sep=" "))
+```
+
+```{r echo = TRUE, results = "hide", warning=FALSE}
+# Check if there are any null values in the type of force used columns
+# If there are values, that column will be kept in the subset
+which(dallas_crime$TYPE_OF_FORCE_USED2=="")
+dallas_crime$TYPE_OF_FORCE_USED2[643]
+which(dallas_crime$TYPE_OF_FORCE_USED3!="")
+dallas_crime$TYPE_OF_FORCE_USED3[13]
+which(dallas_crime$TYPE_OF_FORCE_USED4!="")
+dallas_crime$TYPE_OF_FORCE_USED4[38]
+which(dallas_crime$TYPE_OF_FORCE_USED5!="")
+dallas_crime$TYPE_OF_FORCE_USED5[40]
+which(dallas_crime$TYPE_OF_FORCE_USED6!="")
+which(dallas_crime$TYPE_OF_FORCE_USED7!="")
+which(dallas_crime$TYPE_OF_FORCE_USED8!="")
+which(dallas_crime$TYPE_OF_FORCE_USED9!="")
+which(dallas_crime$TYPE_OF_FORCE_USED10!="")
+```
+
+```{r}
+# Create a dallas_crime subset with fewer columns
+subset_cols <- c("INCIDENT_DATETIME", "INCIDENT_DATE", "OFFICER_ID", "OFFICER_GENDER", "OFFICER_RACE", "OFFICER_YEARS_ON_FORCE", "OFFICER_INJURY", "OFFICER_INJURY_TYPE", "OFFICER_HOSPITALIZATION", "SUBJECT_ID", "SUBJECT_RACE", "SUBJECT_GENDER", "SUBJECT_INJURY", "SUBJECT_INJURY_TYPE", "SUBJECT_WAS_ARRESTED", "SUBJECT_DESCRIPTION", "SUBJECT_OFFENSE", "DIVISION", "LOCATION_FULL_STREET_ADDRESS_OR_INTERSECTION", "LOCATION_LATITUDE", "LOCATION_LONGITUDE", "INCIDENT_REASON", "REASON_FOR_FORCE", "TYPE_OF_FORCE_USED1", "TYPE_OF_FORCE_USED2", "TYPE_OF_FORCE_USED3", "TYPE_OF_FORCE_USED4", "TYPE_OF_FORCE_USED5", "TYPE_OF_FORCE_USED6", "TYPE_OF_FORCE_USED7", "TYPE_OF_FORCE_USED8", "TYPE_OF_FORCE_USED9", "TYPE_OF_FORCE_USED10", "FORCE_EFFECTIVE")
+dallas_crime_subset <- dallas_crime[,subset_cols]
+```
+
+```{r, echo = TRUE, results = "hide"}
+# Check the subset dataframe's structure
+str(dallas_crime_subset)
+```
+
+```{r, message=FALSE, warning=FALSE, echo = TRUE, results = "hide"}
+# Convert the dataset into usable format
+dallas_crime_subset[,"INCIDENT_DATETIME"] <- parse_date_time(dallas_crime_subset$INCIDENT_DATETIME, "%m/%d/%y %I:%M:%S %p")
+dallas_crime_subset[,"INCIDENT_DATE"] <- 
+  parse_date_time(dallas_crime_subset$INCIDENT_DATE, "%m/%d/%y")
+dallas_crime_subset[,"OFFICER_ID"] <- as.numeric(dallas_crime_subset[,"OFFICER_ID"])
+dallas_crime_subset[,"OFFICER_GENDER"] <- as.factor(dallas_crime_subset[,"OFFICER_GENDER"])
+dallas_crime_subset[,"OFFICER_RACE"] <- as.factor(dallas_crime_subset[,"OFFICER_RACE"])
+dallas_crime_subset[,"OFFICER_YEARS_ON_FORCE"] <- as.numeric(dallas_crime_subset[,"OFFICER_YEARS_ON_FORCE"])
+dallas_crime_subset[,"OFFICER_INJURY"] <- as.factor(dallas_crime_subset[,"OFFICER_INJURY"])
+dallas_crime_subset[,"OFFICER_HOSPITALIZATION"] <- as.factor(dallas_crime_subset[,"OFFICER_HOSPITALIZATION"])
+dallas_crime_subset[,"SUBJECT_ID"] <- as.numeric(dallas_crime_subset[,"SUBJECT_ID"])
+dallas_crime_subset[,"SUBJECT_RACE"] <- as.factor(dallas_crime_subset[,"SUBJECT_RACE"])
+dallas_crime_subset[,"SUBJECT_GENDER"] <- as.factor(dallas_crime_subset[,"SUBJECT_GENDER"])
+dallas_crime_subset[,"SUBJECT_INJURY"] <- as.factor(dallas_crime_subset[,"SUBJECT_INJURY"])
+dallas_crime_subset[,"SUBJECT_WAS_ARRESTED"] <- as.factor(dallas_crime_subset[,"SUBJECT_WAS_ARRESTED"])
+dallas_crime_subset[,"FORCE_EFFECTIVE"] <- as.factor(dallas_crime_subset[,"FORCE_EFFECTIVE"])
+dallas_crime_subset[,"LOCATION_LATITUDE"] <- as.numeric(dallas_crime_subset[,"LOCATION_LATITUDE"])
+dallas_crime_subset[,"LOCATION_LONGITUDE"] <- as.numeric(dallas_crime_subset[,"LOCATION_LONGITUDE"])
+str(dallas_crime_subset)
+```
+
+```{r, warning=FALSE}
+# Remove missing values if datetime is na
+datetime_missing_rows <- which(is.na(dallas_crime_subset$INCIDENT_DATETIME))
+dallas_crime_subset <- dallas_crime_subset[-datetime_missing_rows,]
+
+# Remove missing values if latitude is na
+latitude_missing_rows <- which(is.na(dallas_crime_subset$LOCATION_LATITUDE))
+dallas_crime_subset <- dallas_crime_subset[-latitude_missing_rows,]
+```
+
+
+# 1. Income Inequality - Locations of Crime Occurence
+
+The below map and density plots show insights into crime occurrences. The red dots on the map indicate the locations where the crimes occurred. The frequency of the crime occurrence increases as the size of the dots gets bigger.  A large proportion of cases occurred in the county centre and the South of the city. For the Addison district, in the north of the city, most of the crimes happened in the East.
+
+```{r message=FALSE, warning=FALSE}
+# Count crimes
+crimes <- dallas_crime_subset %>% group_by(LOCATION_LONGITUDE, LOCATION_LATITUDE) %>% 
+  count() %>% arrange(desc(n)) %>% drop_na()
+# Rename crimes' column names
+names(crimes) <- c("x","y","n")
+# Get the map of Dallas from OpenStreetMap 
+bbox <- c(left=-96.9990,bottom=32.62,right=-96.5163,top=33.03)
+map <- get_stamenmap(bbox, zoom = 11)
+# Plot crimes on map
+map_overlap_crime <- ggmap(map)+ 
+  geom_point(data = crimes, aes(x = x, y = y, size = n, alpha=0.8, color = "red")) +  
+  labs(title = "Crime Occurences") + 
+  theme(legend.position="none", plot.title = element_text(size = 15))
+map_overlap_crime
+```
+
+Besides, the density plots show that the peak of property crime occurrences is at coordinate (-96.78, 32.70) to (-96.79, 32.80). That area is the city centre. The definition of property crime includes stealing motor vehicles, burglary, and taking money or property from victims without threatening and using force [10]. According to the United State Census Bureau data, the median household income in most of the aforementioned areas in 2016 ranged from 11,000 to 45,700 US dollars [6]. However, a small proportion of households earned 45800 to 77800 annually within the area. Compared with the median household incomes in Texas and across the United States which were 56,565 and 57,617 respectively. Most of the households have a lesser income in that area. That could be a reason why robbery and burglary are more common in that area. On the other hand, the Gini Index which measures income inequality was 0.48 or more in Texas. The number was among the highest rank in the United States in 2016 statistics [12]. Income inequality could be a factor explaining the situation as researchers discovered that there is a positive correlation between them. According to Behrman and Craig, and Bourguignon, rich neighbourhoods enjoy a larger amount of police services compared with poor [9]. Moreover, the social tension caused by inequality could also result in a higher crime rate.
+
+```{r, warning=FALSE}
+# Grab the property cimes
+robbery <- dallas_crime_subset[grep("Robbery", dallas_crime_subset$SUBJECT_OFFENSE),]
+burglary <- dallas_crime_subset[grep("Burglary", dallas_crime_subset$SUBJECT_OFFENSE),]
+theft <-  dallas_crime_subset[grep("Theft", dallas_crime_subset$SUBJECT_OFFENSE),]
+property_crime <- rbind(robbery, burglary)
+property_crime <- rbind(property_crime, theft)
+# Plot the density plots
+density_plot_latitude <- ggplot(data = property_crime, aes(x = LOCATION_LATITUDE)) + 
+  geom_density(fill = "blue", alpha = 0.3) + ggtitle("Distribution of Property Crimes against Location Latitude") +
+  xlab("Location latitude")
+density_plot_longitude <- ggplot(data = property_crime, aes(x = LOCATION_LONGITUDE)) + 
+  geom_density(fill = "blue", alpha = 0.3) + ggtitle("Distribution of Property Crimes against Location Longitude") +
+  xlab("Location longitude")
+grid.arrange(density_plot_longitude, density_plot_latitude, nrow = 2)
+```
+
+# 2. Crime Rate by Sex
+
+```{r, echo = TRUE, results = "hide"}
+# Check for duplicate values
+length(unique(dallas_crime_subset$OFFICER_ID)) == nrow(dallas_crime_subset)
+length(unique(dallas_crime_subset$SUBJECT_ID)) == nrow(dallas_crime_subset)
+
+# Remove duplicate values
+unique_officer <- dallas_crime_subset[!duplicated(dallas_crime_subset$OFFICER_ID),]
+unique_subject <- dallas_crime_subset[!duplicated(dallas_crime_subset$SUBJECT_ID),]
+```
+
+The two-way table below shows the frequency of female and male subjects among all races. For all seven groups, the number of female subjects is significantly lower than male subjects. Among all the Black subjects, the ratio between females and males is around 1:3.96; for Hispanic, the ratio between females and males is roughly 1:7.02; and for White, the ratio is approximately 1:4.06. This phenomenon matches the population parameter collected by the Criminal Justice Information Services Division of the United States government. In 2012, there were 9,446,660 persons arrested in the United States. Among them, the ratio between females and males was around 1:2.82 (the number of arrested females was 2,474,637 and males was 6,972,023). Although the gender gap in crime rate is well established in criminology, there are no clear explanations for it. Some researchers associate that with physical differences, such as resting heart rate, while social control, differential association, strain, and reintegrative shaming are blamed under the context of traditional theories [2]. The traditional theories associate the higher crime rate of males with the differences in social expectations and parenting for the two sexes, such as females should be more nurturing, while males being more status-seeking [24]. Due to those variations, males are more impulsive compared with females.
+
+```{r}
+# Create a two-way table
+table(unique_subject$SUBJECT_GENDER, unique_subject$SUBJECT_RACE)
+```
+
+# 3. Racial Discrimination - subjects and officers' race
+
+```{r, echo = TRUE, results = "hide"}
+# Count the total number of officers and subjects
+nrow(unique_officer)
+nrow(unique_subject)
+# Create race table and dataframe
+off_race <- unique_officer %>% group_by(OFFICER_RACE) %>% summarize(n = n())
+sub_race <- unique_subject %>% group_by(SUBJECT_RACE) %>% summarize(n = n())
+sub_race <- sub_race[-5, ]
+race_1 <- off_race %>% rename(RACE = OFFICER_RACE)
+race_2 <- sub_race %>% rename(RACE = SUBJECT_RACE)
+merge_race <- race_1 %>% inner_join(race_2, by = 'RACE')
+```
+The bar graph below shows the frequency of the subject's and officer's race. A large proportion - around 64% of the officers is white (1470 out of 2318 persons). On the other hand, nearly 58% of the subjects are black (1333 out of 2318 persons). However, in 2016, only 24.4% of the population in Dallas was African American and slightly more than a quarter was white (28.7%) according to the United States Census Bureau [4]. 
+```{r}
+# Plot the frequency of race between two groups [23]
+race_barplot <- merge_race %>% plot_ly()
+race_barplot <- race_barplot %>% add_trace(name = "Officer",x = ~RACE, y = ~n.x, type = 'bar',
+             text = "Officer", textposition = 'auto',
+             marker = list(color = 'rgba(55, 128, 191, 0.7)',
+                           line = list(color = 'rgba(55, 128, 191, 0.7)', width = 1)))
+race_barplot <- race_barplot %>% add_trace(name = "Subject",x = ~RACE, y = ~n.y, type = 'bar',
+            text = "Subject", textposition = 'auto',
+            marker = list(color = 'rgba(219, 64, 82, 0.7)',
+                          line = list(color = 'rgba(219, 64, 82, 0.7)', width = 1)))
+race_barplot <- race_barplot %>% layout(title = "Frequency of Race",
+         barmode = 'group',
+         xaxis = list(title = "Race"),
+         yaxis = list(title = "Count"))
+race_barplot
+```
+
+The embedding of racial discrimination in society, as Gibbson et al. pointed out, presents at various levels, for instance, economic, institutional, and societal [11]. A series of disadvantages facing by the Black community could be an aftermath of structural racism. For instance, in Los Angeles, food insecurity, a high rate of homelessness and poor living conditions are haunting Black children. All these challenges result in a lower level of performance in schools for Black children [21]. Some studies suggest that there is an inversed correlation between education and crime. For example, lower violent crime rates are observed in States with higher college enrolment rates [5]. According to the United States Census Bureau, from 2017 to 2021, 79.6% of the Dallas population who were 25 or above years old had received high school graduate or higher education [27]. While 88.9% of the national population had a qualification of high school graduate or higher education [28]. That could explain the higher crime rate in Dallas - compared to the national data, Dallas had higher violent and property crime rates [3].
+
+As stated in the 2016 hate crime statistics by the Federal Bureau of Investigation, more than half – 57.5% of single-bias incidents were due to racial bias. Researchers also suggest that discrimination is positively correlated with youth crime committed by Black people. Unnever, Owusu-Bempah and Deryol found out Black teenagers are more likely to be viewed as suspicious by the police [26]. As a result, they are more likely to experience the stop-and-check process and arrested due to committing misdemeanours. On the other hand, the White dominance in the culture worsens the financial stability of the Black community as compared with White people, their educational and employment opportunities are scarce [29]. Therefore, embedding racial discrimination causes income inequality, and the inability of establishing their social status also strengthens racial biases.
+
+
+# 4. The Lack of Diversity in the Local Police Force
+
+The scatterplots below show the dispersion of the subject’s and officer’s races with the locations. In the first set of scatterplots, there are three peaks. The first one is at around 32.71 degrees of latitude. The second one is near 32.78 degrees of latitude. The third one is at 32.91 degrees of latitude. For the second set of scatterplots, there are 3 peaks as well. The first one is at around -96.8 degrees of longitude. The second one is at -96.82 degrees of longitude. The third one is at -96.7 degrees of longitude. For all the peaks, the major races for subject and officer are Black and White respectively. This might indicate the lack of diversity in the police force and the racial discrimination in the system.
+
+```{r}
+# Scatterplots - race ~ location (latitude)
+#get_legend<-function(myggplot){
+  #tmp <- ggplot_gtable(ggplot_build(myggplot))
+  #leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  #legend <- tmp$grobs[[leg]]
+  #return(legend)
+#}
+sub_lat <- ggplot(data = dallas_crime_subset) +
+  aes(y = LOCATION_LATITUDE, x = SUBJECT_RACE, color = SUBJECT_RACE) +
+  geom_beeswarm(cex = 0.5, alpha = 0.6, show.legend = FALSE) +
+  xlab("Subject\'s race") +
+  ylab("Location latitude") +
+  coord_flip()
+off_lat <- ggplot(data = dallas_crime_subset) +
+  aes(y = LOCATION_LATITUDE, x = OFFICER_RACE, color = OFFICER_RACE) +
+  geom_beeswarm(cex = 0.5, alpha = 0.6, show.legend = FALSE) +
+    xlab("Officer\'s race") +
+  ylab("Location latitude") +
+  coord_flip()
+  #theme(legend.position="none")
+#legend <- get_legend(sub_lat)
+grid.arrange(sub_lat, off_lat, nrow = 2,
+             top=textGrob("Scatterplot for Location Latitude and Race",gp=gpar(fontsize=15)))
+```
+
+```{r}
+# Scatterplots - officer race ~ location (longitude)
+sub_lon <- ggplot(data = dallas_crime_subset) +
+  aes(y = LOCATION_LONGITUDE, x = SUBJECT_RACE, color = SUBJECT_RACE) +
+  geom_beeswarm(cex = 0.5, alpha = 0.6, show.legend = FALSE) +
+  xlab("Subject\'s race") +
+  ylab("Location longitude") +
+  coord_flip()
+off_lon <- ggplot(data = dallas_crime_subset) +
+  aes(y = LOCATION_LONGITUDE, x = OFFICER_RACE, color = OFFICER_RACE, alpha = 0.6) +
+  geom_beeswarm(cex = 0.5, alpha = 0.6, show.legend = FALSE) +
+  xlab("Officer\'s race") +
+  ylab("Location longitude") +
+  coord_flip()
+grid.arrange(sub_lon, off_lon, nrow = 2,
+             top=textGrob("Scatterplot for Location Longitude and Race",gp=gpar(fontsize=15)))
+```
+
+On the other hand, the lack of diversity in the local police department can also escalate the problem and enhance social distrust among all races. According to the Bureau of Justice Statistics survey, 71.5% of the local police officers were White between 1997 and 2016. Only 11.4% and 12.5% of them were Black and Hispanic. Moreover, only 1 in 8 local police officers were female [14]. In Dallas, a similar distribution of officer gender was found on the below pie chart. 12.1% of total officers are females and 87.9% of them are males.  According to Mummolo, White officers use more force and perform a significant number of stops and arrests compared with their Black and Hispanic colleagues. Compared with their male counterpart, female officers also use less force [13].
+
+```{r}
+# drop the duplicated officer ids
+dallas_officer <- dallas_crime_subset[!duplicated(dallas_crime_subset$OFFICER_ID),]
+# Count the numbers of female and male officers
+dallas_officer <- dallas_officer %>% group_by(OFFICER_GENDER) %>% count(OFFICER_ID) %>% summarise(n = n())
+# Create the pie chart [23]
+officer_gender_plot <- plot_ly(dallas_officer, labels = ~OFFICER_GENDER, values = ~n, type = 'pie',
+        textposition = 'inside',
+        textinfo = 'label+percent',
+        insidetextfont = list(color = 'white'),
+        hoverinfo = 'text',
+        text = ~paste(n, " persons"),
+        marker = list(line = list(color = 'white', width = 1)),
+                      showlegend = FALSE)
+officer_gender_plot <- officer_gender_plot %>% layout(title = 'The Distribution of Officer Gender',
+         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
+         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
+
+officer_gender_plot
+```
+
+# 5. The Linear Response-to-Resistance Continuum and Officer Type of Force
+
+According to the Dallas Police Department, a Linear Response-to-Resistance Continuum is deployed as their training model. The Continuum is a guideline for force required regarding the subject’s resistance level and the level of control needed under other circumstances [7]. On the first level, if the subject is verbally resistive and intimidating the officer, the officer should give out verbal commands. On the second level, if the subject resists passively - declines in responding to the officer properly, the officer can proceed to the soft empty hand control. If the officer encountered defensive resistance afterwards, the officer could use electronic control weapons, OC spray (pepper spray) and P-balls (pepper balls) to gain hand control. When the situation keeps escalating, the officer could use other intermediate weapons, such as batons, to deal with an actively aggressive subject. Lethal force could be used when facing aggravated aggressive resistance – the officer, the subject, and another person could face serious or fatal injuries because of the subject’s actions [17]. The below tables show the frequencies of the type of force being used under each situation. The first table is the frequency of police actions under active aggression. The types of force being implemented include verbal commands, physical attacks, such as strikes and take down, and other intermediate weapons, for instance, OC spray, taser, and baton. These kinds of responses are in line with the protocol. The second table is the number of police actions when performing arrest tasks. Compared with the aforementioned table, K-9 and other impact weapons were deployed on top of the control methods mentioned before. K-9 means using trained police dogs to assist law enforcement [20]. However, due to the ambiguity of the situations encountered when implementing the arrest tasks and the definition of other impact weapons, it is difficult to decipher the appropriateness of the type of force being used.
+
+```{r, echo = TRUE, results = "hide"}
+force <- table(dallas_crime_subset$REASON_FOR_FORCE, dallas_crime_subset$TYPE_OF_FORCE_USED1)
+force_2 <- as.data.frame(force)
+force_2 <- force_2 %>% arrange(desc(Freq))
+force_2 <- force_2[1:15,]
+print(force_2)
+```
+
+```{r}
+sort(force["Active Aggression",], decreasing = TRUE)
+```
+
+```{r}
+sort(force["Arrest",], decreasing = TRUE)
+```
+
+
+# 6. Correlation between Officers' Experience and Injury Status
+
+The boxplot below compares the officer years of force in two groups – injured subjects and non-injured subjects. Both groups are right-skewed and their median, Q3 and interquartile ranges are roughly the same. However, the injured subject group has slightly higher Q1 and minimum values which are near 3.5 years and 1 year respectively. The reason behind this could be new graduates from the Dallas Police Basic Training Academy have to work under the guidance of experienced Field Training Officers for 24 weeks [8]. Therefore, there is less chance they need to perform law enforcement alone. On the other hand, the experience of officers seems to have no influence on the injury status of the subject because of the largely identical distribution of the two groups as the situation in the crime scenes varies and the different values of the officer also affect their actions [22].
+
+```{r}
+# Boxplot
+ggplot(data = dallas_crime_subset, aes(x = SUBJECT_INJURY, y = OFFICER_YEARS_ON_FORCE)) +
+    geom_boxplot() +
+        ggtitle('Officer\'s Years of Force against Subject Injury') +
+        theme(plot.title = element_text(size = 15)) +
+        labs(x = 'Subject Injury', y = 'Officer Years of Force')
+```
+
+The first mosaic plot below represents the correlation between officer injury status and their experience. A majority of police have 0 to 5 years of experience. The smallest group is officers with more than 10 years of experience. Compared with police with more experience, officers with 0 to 5 years of experience have a lower injury rate (*P* = 0.01).  They also have the highest hospitalization rate among the 3 groups of officers who are injured. The Dallas data does not in line with the findings of the national multi-Agency injury tracking study in 2009. The study found that among all the injured officers, 40% of them were less experienced, with 1 to 5 years of experience [25]. However, other lurking variables, such as the training which officers received, their fitness, and so on, might be the reason affecting the Dallas data.
+
+```{r}
+# Group officers with their experience
+dallas_crime_subset <- dallas_crime_subset %>% mutate(force_years =
+                     case_when(OFFICER_YEARS_ON_FORCE <= 5 ~ "0-5", 
+                               OFFICER_YEARS_ON_FORCE >= 6 & OFFICER_YEARS_ON_FORCE <= 10 ~ "6-10",
+                               OFFICER_YEARS_ON_FORCE >= 11 ~ ">10")) %>% 
+                       arrange(force_years)
+# Create a mosaic plot [15]
+tbl_injury_rate <- xtabs(~force_years + OFFICER_INJURY, dallas_crime_subset)
+mosaic(tbl_injury_rate, 
+       shade = TRUE,
+       labeling_args = list(set_varnames = c(force_years = "Years of Experience",
+                                             OFFICER_INJURY = "Injury")),
+       main = "Correlation between Officer Injury Rate and Experience")
+```
+
+```{r}
+tbl_injury_rate <- xtabs(~force_years + OFFICER_INJURY + OFFICER_HOSPITALIZATION, dallas_crime_subset)
+mosaic(tbl_injury_rate, 
+       labeling_args = list(set_varnames = c(force_years = "Years of Experience",
+                                             OFFICER_INJURY = "Injury",
+                                             OFFICER_HOSPITALIZATION = "Hospitalization")),
+       main = "Correlation between Experience and Hospitalization Rate")
+```
+
+# 7. Seasonal Trend of Crime
+
+The line graph below shows the daily number of crimes in Dallas between 1st January and 31st December 2016, and the centre’s 7-day moving average. For the daily occurrences of crime, there are 4 peaks. A peak is defined as a day with more than 20 cases occurring. Those are 14th February, 11th March, 10th June, and 30th September. When observing the moving average, the case frequency is declining during winter, from December to January, and started to shoot up in the middle of February. In the middle of summer, there is a short period of time when the crime rate drops to a similar level to December. But it starts increasing and climbs to 24 cases per day, the highest number in 2016. Generally, if dividing the timeline into 4 seasons – spring (from March to May), summer (from June to August), fall (from September to November), and winter (from December to February), spring has the greatest mean value in crime rate, while fall has the smallest. 
+
+```{r warning=FALSE}
+# Timeseries: crime frequency per day
+# Construct a new dataframe with number of crimes per day
+dallas_crime_subset <- dallas_crime_subset %>% arrange(INCIDENT_DATETIME)
+dallas_crime_subset <- dallas_crime_subset %>% group_by(INCIDENT_DATE) %>% mutate(n_crime = n())
+timeseries_data <- c("INCIDENT_DATE", "n_crime")
+dallas_timeseries <- dallas_crime_subset[,timeseries_data]
+# remove duplicates
+dallas_timeseries <- dallas_timeseries[!duplicated(dallas_timeseries),]
+# Add 7-day moving average to dataframe
+# Add 7-day moving average to dataframe
+moving_average_forward <- rollmean(dallas_timeseries$n_crime, k = 7, fill = NA,  align = "right")
+moving_average_backward <- rollmean(dallas_timeseries$n_crime, k = 7, fill = NA,  align = "left")
+moving_average_center <- rollmean(dallas_timeseries$n_crime, k = 7, fill = NA)
+#dallas_timeseries["seven_moving_avg_forward"] <- moving_average_forward
+#dallas_timeseries["seven_moving_avg_backward"] <- moving_average_backward
+# Concatalate the moving average with the dataframe
+dallas_timeseries["seven_moving_avg_centre"] <- moving_average_center
+# Round the moving average
+dallas_timeseries <- dallas_timeseries %>% mutate(seven_moving_avg_centre = round(seven_moving_avg_centre, 2))
+
+# Create an interactive plot [23]
+interactive_plot <- plot_ly(dallas_timeseries, type = 'scatter', mode = 'line', width = 1000)%>%
+  add_trace(x = ~INCIDENT_DATE, y = ~n_crime, name = 'Cases')%>%
+  add_trace(x = ~INCIDENT_DATE, y = ~seven_moving_avg_centre, name = '7-day moving \n average (centre)') %>% 
+  layout(title = "The number of crimes in Dallas Jan 2016 - Jan 2017",
+         legend=list(title=list(text='variable')),
+         xaxis = list(dtick = "M1", tickformat="%b<br>%Y"))
+options(warn = -1)
+
+interactive_plot <- interactive_plot %>%
+  layout(
+         xaxis = list(title = "Date",
+                      zerolinecolor = "#ffff",
+                      zerolinewidth = 2,
+                      gridcolor = "ffff",
+                      tickformat = "%d %B %Y"),
+         yaxis = list(title = "Cases", 
+                      zerolinecolor = "#ffff",
+                      zerolinewidth = 2,
+                      gridcolor = "ffff"),
+         plot_bgcolor='#e5ecf6')
+
+interactive_plot
+```
+
+
+```{r}
+# Get the mean values of each season
+dem <- dallas_timeseries[which(dallas_timeseries$INCIDENT_DATE > as.POSIXlt("2016-12-01")),]
+winter <- dallas_timeseries[which(dallas_timeseries$INCIDENT_DATE < as.POSIXlt("2016-03-01")),]
+winter <- rbind(dem,winter)
+spring <- dallas_timeseries[which(dallas_timeseries$INCIDENT_DATE > as.POSIXlt("2016-02-29") & 
+                        dallas_timeseries$INCIDENT_DATE < as.POSIXlt("2016-06-01")),]
+summer <- dallas_timeseries[which(dallas_timeseries$INCIDENT_DATE > as.POSIXlt("2016-06-01") & 
+                        dallas_timeseries$INCIDENT_DATE < as.POSIXlt("2016-09-01")),]
+fall <- dallas_timeseries[which(dallas_timeseries$INCIDENT_DATE > as.POSIXlt("2016-09-01") & 
+                        dallas_timeseries$INCIDENT_DATE < as.POSIXlt("2016-12-01")),]
+# Get the mean crime cases in spring
+mean(spring$n_crime)
+# Get the mean crime cases in summer
+mean(summer$n_crime)
+# Get the mean crime cases in fall
+mean(fall$n_crime)
+# Get the mean crime cases in winter
+mean(winter$n_crime)
+```
+
+According to the Bureau of Justice Statistics, seasonal fluctuations are spotted for each type of violent and property crime excluding robbery with summer ranking the highest [16]. Besides, spring is safer compared with other seasons in some cases. However, in the Dallas data in 2016, spring ranked the highest with the mean crime number of 7.67 cases (rounded to two decimal places) among all seasons (the mean in summer was 5.97 cases; in fall was 5.94 cases; and in winter was 6.39 cases) with robbery being excluded.
+
+The below line graph shows the daily number of crimes excluding robbery cases. There are no outstanding differences compared with the previous plot due to there being only 29 robbery cases out of 2318 total cases in 2016. When examining the moving average, the values in spring are hovering between 5 and 10.14 and there are also fewer valleys compared with other seasons.
+
+```{r}
+# Create a dataframe exclude robbery
+dallas_crime_exclude_robb <- dallas_crime_subset[-grep("Robbery", dallas_crime_subset$SUBJECT_OFFENSE),]
+dallas_crime_exclude_robb <- dallas_crime_exclude_robb %>% arrange(INCIDENT_DATETIME)
+dallas_crime_exclude_robb <- dallas_crime_exclude_robb %>% group_by(INCIDENT_DATE) %>% mutate(n_crime = n())
+timeseries_data_exclude_robb <- c("INCIDENT_DATE", "n_crime")
+exclude_robbery <- dallas_crime_exclude_robb[,timeseries_data_exclude_robb]
+# remove duplicates
+exclude_robbery <- exclude_robbery[!duplicated(exclude_robbery),]
+# Get the moving average
+mov_avg_centre <- rollmean(exclude_robbery$n_crime, k = 7, fill = NA)
+# Concatalate the moving average with the dataframe
+exclude_robbery["seven_moving_avg_centre"] <- mov_avg_centre
+# Round the moving average
+exclude_robbery <- exclude_robbery %>% mutate(seven_moving_avg_centre = round(seven_moving_avg_centre, 2))
+
+# Plot
+timeseries_2 <- plot_ly(exclude_robbery, type = 'scatter', mode = 'line', width = 1000)%>%
+  add_trace(x = ~INCIDENT_DATE, y = ~n_crime, name = 'Cases')%>%
+  add_trace(x = ~INCIDENT_DATE, y = ~mov_avg_centre, name = '7-day moving \n average (centre)') %>% 
+  layout(title = "The number of crimes in Dallas Jan 2016 - Jan 2017 (Excluding Robbery)",
+         legend=list(title=list(text='variable')),
+         xaxis = list(dtick = "M1", tickformat="%b<br>%Y"))
+options(warn = -1)
+
+timeseries_2 <- timeseries_2 %>%
+  layout(
+         xaxis = list(title = "Date",
+                      zerolinecolor = "#ffff",
+                      zerolinewidth = 2,
+                      gridcolor = "ffff",
+                      tickformat = "%d %B %Y"),
+         yaxis = list(title = "Cases", 
+                      zerolinecolor = "#ffff",
+                      zerolinewidth = 2,
+                      gridcolor = "ffff"),
+         plot_bgcolor='#e5ecf6')
+
+timeseries_2
+```
+
+```{r, echo = TRUE, results = "hide"}
+# Get the mean values of each season (exclude robbery)
+dem <- exclude_robbery[which(exclude_robbery$INCIDENT_DATE > as.POSIXlt("2016-12-01")),]
+winter <- exclude_robbery[which(exclude_robbery$INCIDENT_DATE < as.POSIXlt("2016-03-01")),]
+winter <- rbind(dem,winter)
+spring <- exclude_robbery[which(exclude_robbery$INCIDENT_DATE > as.POSIXlt("2016-02-29") & 
+                        exclude_robbery$INCIDENT_DATE < as.POSIXlt("2016-06-01")),]
+summer <- exclude_robbery[which(exclude_robbery$INCIDENT_DATE > as.POSIXlt("2016-06-01") & 
+                        exclude_robbery$INCIDENT_DATE < as.POSIXlt("2016-09-01")),]
+fall <- exclude_robbery[which(exclude_robbery$INCIDENT_DATE > as.POSIXlt("2016-09-01") & 
+                        exclude_robbery$INCIDENT_DATE < as.POSIXlt("2016-12-01")),]
+# Get the mean crime cases in spring (exclude robbery)
+mean(spring$n_crime)
+# Get the mean crime cases in summer (exclude robbery)
+mean(summer$n_crime)
+# Get the mean crime cases in fall (exclude robbery)
+mean(fall$n_crime)
+# Get the mean crime cases in winter (exclude robbery)
+mean(winter$n_crime)
+# Get the total number of robbery cases
+robbery <- dallas_crime_subset[grep("Robbery", dallas_crime_subset$SUBJECT_OFFENSE),]
+nrow(robbery)
+```
+# Conclusion
+
+The root causes of crime are hard to decipher, but the data might give out some hints to it. For instance, the embedding discrimination within the society might lead to an imbalance of police service distribution, a higher frequency of stop-and-check encountered by the Black community, and the lack of a diverse local police force. In order to mitigate the problem, it is advised to reform the police system by creating a more diverse working environment and ensuring access to educational subsidies for the economically disadvantaged community. On the other hand, there is no evidence found indicating police brutality and the presence of seasonal crime trends within the data. Besides, no correlation is spotted between the experience of officers and the injury status of subjects and the relationship between the experience of officers and their injury and hospitalization status is unclear.
+
+
+# References
+[1] Amnesty International. Police Violence [Internet]. 2020 [Cited 21 Apr. 2023] Available from: https://www.amnesty.org/en/what-we-do/police-brutality/ 
+
+[2] CHOY, O., RAINE, A., VENABLES, P.H. and FARRINGTON, D.P.  EXPLAINING THE GENDER GAP IN CRIME: THE ROLE OF HEART RATE. Criminology, 55: 465-487. [Internet]. 2017 [Cited 21 Apr. 2023] Available from: https://doi.org/10.1111/1745-9125.12138
+
+[3] City-Data.com. Crime in Dallas, Texas (TX): murders, rapes, robberies, assaults, burglaries, thefts, auto thefts, arson, law enforcement employees, police officers, crime map. [Internet]. 2021 [Cited 21 Apr. 2023] Available from: https://www.city-data.com/crime/crime-Dallas-Texas.html.
+
+[4] City of Dallas. Dallas by numbers 2016. [Internet]. 2018 [Cited 22 Apr. 2023] Available from: https://dallascityhall.com/departments/pnv/Pages/Dallas-by-numbers-2016.aspx 
+
+[5] Crews, G. Education and crime. In J. M. Miller 21st Century criminology: A reference handbook (pp. 59-66). SAGE Publications, Inc. [Internet]. 2009 [Cited 22 Apr. 2023] Available from: https://www.doi.org/10.4135/9781412971997.n8
+
+[6] Data USA. DALLAS, TX. [Internet]. 2023 [Cited 21 Apr. 2023] Available from: https://datausa.io/profile/geo/dallas-tx/
+
+[7] Dallas Police Department. reporting-requirements. [Internet]. 2019 [Cited 22 Apr. 2023] Available from: https://dallaspolice.net/reports/Pages/response-resistance.aspx
+
+[8] Dallas Police Department. Training-Academy. [Internet]. 2019 [Cited 22 Apr. 2023] Available from: https://dallaspolice.net/training-academy
+
+[9] Fajnzylber, P., Lederman, D., & Loayza, N. Inequality and Violent Crime. The Journal of Law & Economics, 45(1), 1–39. [Internet]. 2002 [Cited 25 Apr. 2023] Available from: https://doi.org/10.1086/338347
+
+[10] Federal Bureau of Investigation. Property Crime. [Internet]. 2010 [Cited 24 Apr. 2023] Available from: https://ucr.fbi.gov/crime-in-the-u.s/2010/crime-in-the-u.s.-2010/property-crime
+
+[11] Gibbons, F. X., Fleischli, M. E., Gerrard, M., Simons, R. L., Weng, C. Y., & Gibson, L. P. The impact of early racial discrimination on illegal behavior, arrest, and incarceration among African Americans. The American psychologist, 75(7), 952–968. [Internet]. 2020 [Cited 24 Apr. 2023] Available from: https://doi.org/10.1037/amp0000533
+
+[12] Guzman, G.G. American Community Survey Briefs: Household Income: 2016. [Internet]. 2017 [Cited 21 Apr. 2023] Available from: https://www.census.gov/content/dam/Census/library/publications/2017/acs/acsbr16-02.pdf
+
+[13] Huber, R. Diversity in policing can improve police-civilian interactions, say Princeton researchers. [Internet]. 2021 [Cited 24 Apr. 2023] Available from: https://www.princeton.edu/news/2021/02/11/diversity-policing-can-improve-police-civilian-interactions-say-princeton
+
+[14] Hyland, S., Davis, E. and Statisticians, B. Local Police Departments, 2016: Personnel. [Internet]. 2019 [Cited 24 Apr. 2023] Available from: https://bjs.ojp.gov/content/pub/pdf/lpd16p.pdf
+
+[15] Kabacoff, R. Data Visualization with R. [Internet] 2020  [Cited 25 Apr. 2023] Available from: https://rkabacoff.github.io/datavis/Models.html.
+
+[16] Lauritsen, J., Fellow, V. and White, N. BJS Special Report Seasonal Patterns in Criminal Victimization Trends. [Internet]. 2014 [Cited 24 Apr. 2023] Available from: https://bjs.ojp.gov/content/pub/pdf/spcvt.pdf
+
+[17] Law Insider. Aggravated Aggressive Resistance Definition. [Internet]. 2023 [Cited 24 Apr. 2023] Available from: https://www.lawinsider.com/dictionary/aggravated-aggressive-resistance.
+
+[18] Mapping Police Violence. Mapping Police Violence. [Internet]. 2022 [Cited 21 Apr. 2023] Available from: https://mappingpoliceviolence.org/
+
+[19] National Institute of Justice. Overview of Police Use of Force. [Internet]. 2020 [Cited 21 Apr. 2023]. Available from: https://nij.ojp.gov/topics/articles/overview-police-use-force
+
+[20] National Police Dog Foundation. About K-9s - National Police Dog Foundation. [Internet]. 2019 [Cited 21 Apr. 2023] Available from: https://www.nationalpolicedogfoundation.org/about-k9s
+
+[21] Noguera, P. A., & Alicea, J. A. Structural racism and the urban geography of education. Phi Delta Kappan, 102(3), 51–56. [Internet]. 2020 [Cited 21 Apr. 2023] Available from: https://doi.org/10.1177/0031721720970703
+
+[22] Papazoglou, K., Bonanno, G., Blumberg, D. and Keesee, T. Moral Injury in Police Work. [Internet]. 2019 [Cited 22 Apr. 2023] Available from: https://leb.fbi.gov/articles/featured-articles/moral-injury-in-police-work
+
+[23] Plotly. Plotly R Graphing Library. [Internet]. 2023 [Cited 22 Apr. 2023] Available from: https://plotly.com/r/
+
+[24] Steffensmeier, Darrell & Allan, Emilie. Gender and Crime: Toward a Gendered Theory of Female Offending. Annual Review of Sociology. 22. 459-487. [Internet]. 2003 [Cited 22 Apr. 2023] Available from: 10.1146/annurev.soc.22.1.459. 
+
+[25] The International Association of Chiefs of Police, The IACP Center For Officer Safety & Wellness and The Bureau Of Justice Assistance. The International Association The IACP Center For Officer Safety & Wellness The Bureau Of Justice Assistance of Chiefs of Police A Summary of Data Findings and Recommendations from a Multi-Agency Injury Tracking Study FINAL REPORT Reducing Officer Injuries. [Internet]. 2013 [Cited 25 Apr. 2023] Available from: https://www.theiacp.org/sites/default/files/2018-07/IACP_ROI_Final_Report.pdf
+
+[26] Unnever JD, Owusu-Bempah A, & Deryol R. A Test of the Differential Involvement Hypothesis. Race and Justice, 9(2), 197–224. [Internet].  2019 [Cited 25 Apr. 2023] Available from: https://scholar.google.com/scholar_lookup?journal=Race+and+Justice&title=A+Test+of+the+Differential+Involvement+Hypothesis&author=JD+Unnever&author=A+Owusu-Bempah&author=R+Deryol&volume=9&issue=2&publication_year=2019&pages=197-224&
+
+[27] United States Census Bureau. QuickFacts: Dallas city, Texas. [Internet]. 2022 [Cited 24 Apr. 2023] Available from: https://www.census.gov/quickfacts/fact/table/dallascitytexas/EDU685221#EDU685221
+
+[28] United States Census Bureau. QuickFacts: United States. [Internet]. 2022 [Cited 24 Apr. 2023]. Available from: https://www.census.gov/quickfacts/fact/table/US/PST045221
+
+[29] Wolfgang, M.E. Crime and Race - Conceptions and Misconceptions | Office of Justice Programs. [Internet]. 1964 [Cited 22 Apr. 2023] Available from: https://www.ojp.gov/ncjrs/virtual-library/abstracts/crime-and-race-conceptions-and-misconceptions
